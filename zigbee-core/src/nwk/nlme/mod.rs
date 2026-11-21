@@ -264,7 +264,7 @@ where
         let frame_control = NwkFrameControl(0)
             .set_frame_type(NwkFrameType::Data)
             .set_protocol_version(2)
-            .set_discover_route(DiscoverRoute::Suppress)
+            .set_discover_route(DiscoverRoute::Enable)
             .set_security_flag(secure);
 
         let seq = self.next_nwk_seq();
