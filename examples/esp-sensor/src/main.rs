@@ -118,6 +118,7 @@ static BASIC: BasicServer = BasicServer {
     hw_version: 1,
     manufacturer_name: "zigbee-rs",
     model_identifier: "zigbee-rs.temp-sensor",
+    date_code: "20260101",
     // 0x03: battery.
     power_source: 0x03,
 };
