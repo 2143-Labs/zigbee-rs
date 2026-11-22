@@ -848,6 +848,7 @@ mod tests {
         hw_version: 1,
         manufacturer_name: "zigbee-rs",
         model_identifier: "temp-1",
+        date_code: "20260101",
         power_source: 0x03,
     };
 
@@ -1063,6 +1064,7 @@ mod tests {
                 0x03, 0x00, 0x20, // HWVersion, uint8
                 0x04, 0x00, 0x42, // ManufacturerName, string
                 0x05, 0x00, 0x42, // ModelIdentifier, string
+                0x06, 0x00, 0x42, // DateCode, string
                 0x07, 0x00, 0x30, // PowerSource, enum8
             ]
         );

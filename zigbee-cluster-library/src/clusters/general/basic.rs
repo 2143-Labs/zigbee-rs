@@ -54,6 +54,8 @@ pub const MANUFACTURER_NAME: Attribute<ShortText> =
 /// `ModelIdentifier` (ZCL 3.2.2.2.6).
 pub const MODEL_IDENTIFIER: Attribute<ShortText> =
     CLUSTER.attribute(AttributeId(0x0005), "ModelIdentifier");
+/// `DateCode` (ZCL 3.2.2.2.7), the build date as `YYYYMMDD`.
+pub const DATE_CODE: Attribute<ShortText> = CLUSTER.attribute(AttributeId(0x0006), "DateCode");
 /// `PowerSource` (ZCL 3.2.2.2.9).
 pub const POWER_SOURCE: Attribute<PowerSource, ReadOnly> =
     CLUSTER.attribute(AttributeId(0x0007), "PowerSource");
@@ -75,6 +77,8 @@ pub mod attribute {
     pub const MANUFACTURER_NAME: u16 = super::MANUFACTURER_NAME.id().0;
     /// `ModelIdentifier` (`string`).
     pub const MODEL_IDENTIFIER: u16 = super::MODEL_IDENTIFIER.id().0;
+    /// `DateCode` (`string`).
+    pub const DATE_CODE: u16 = super::DATE_CODE.id().0;
     /// `PowerSource` (`enum8`).
     pub const POWER_SOURCE: u16 = super::POWER_SOURCE.id().0;
 }
@@ -88,6 +92,7 @@ const ATTRIBUTES: &[AttrInfo] = &[
     HW_VERSION.attr_info(),
     MANUFACTURER_NAME.attr_info(),
     MODEL_IDENTIFIER.attr_info(),
+    DATE_CODE.attr_info(),
     POWER_SOURCE.attr_info(),
 ];
 
@@ -101,6 +106,8 @@ pub struct BasicServer<'a> {
     pub hw_version: u8,
     pub manufacturer_name: &'a str,
     pub model_identifier: &'a str,
+    /// `DateCode` as `YYYYMMDD` (ZCL 3.2.2.2.7), the date this build was made.
+    pub date_code: &'a str,
     /// `PowerSource` enum8 (ZCL 3.2.2.2.9), e.g. `0x01` = mains, `0x03` =
     /// battery.
     pub power_source: u8,
@@ -138,6 +145,12 @@ impl ClusterServer for BasicServer<'_> {
                     return Status::InvalidValue;
                 };
                 MODEL_IDENTIFIER.encode(model, out, offset)
+            }
+            attribute::DATE_CODE => {
+                let Some(code) = ShortStr::new(self.date_code) else {
+                    return Status::InvalidValue;
+                };
+                DATE_CODE.encode(code, out, offset)
             }
             attribute::POWER_SOURCE => {
                 POWER_SOURCE.encode(PowerSource(self.power_source), out, offset)
@@ -178,6 +191,7 @@ mod tests {
         hw_version: 1,
         manufacturer_name: "zigbee-rs",
         model_identifier: "temp-1",
+        date_code: "20261101",
         power_source: 0x03,
     };
 
@@ -238,6 +252,31 @@ mod tests {
         assert_eq!(records[2].attribute_id, 0x9999);
         assert_eq!(records[2].status, Status::UnsupportedAttribute);
         assert_eq!(records[2].value, None);
+    }
+
+    #[test]
+    fn reads_date_code() {
+        // ZCL Read Attributes for DateCode (0x0006)
+        let asdu = [0x00, 0x07, 0x00, 0x06, 0x00];
+
+        let mut out = [0u8; 128];
+        let reply = SERVER
+            .handle(&request(CLUSTER_ID, &asdu), &mut out)
+            .expect("date code read handled");
+
+        let (frame, _) = ZclFrame::try_read(&out[..reply.len], ()).unwrap();
+        let ZclFramePayload::GeneralCommand(GeneralCommand::ReadAttributesResponse(records)) =
+            frame.payload
+        else {
+            panic!("expected ReadAttributesResponse");
+        };
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].attribute_id, 0x0006);
+        assert_eq!(records[0].status, Status::Success);
+        assert_eq!(
+            records[0].value,
+            Some(ZclDataType::String(ZclString::CharString("20261101")))
+        );
     }
 
     #[test]
