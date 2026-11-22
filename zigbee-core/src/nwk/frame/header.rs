@@ -66,7 +66,7 @@ impl_byte! {
         /// the originator.
         ///
         /// See Section 3.3.1.9.2.
-        #[ctx = byte::ctx::Bytes::Len(relay_count as usize)]
+        #[ctx = byte::ctx::Bytes::Len(relay_count as usize * 2)]
         #[ctx_write = ()]
         pub relay_list: &'a [u8],
     }
@@ -93,5 +93,22 @@ mod tests {
         assert_eq!(header.source_ieee, Some(IeeeAddress(0x0012_4b00_2a9a_7166)));
         assert_eq!(header.radius, 8);
         assert_eq!(header.sequence_number, 191);
+    }
+
+    // 3.3.1.9: a frame source-routed through one relay carries one 16-bit
+    // relay address; the auxiliary security header (0x28) follows it
+    #[test]
+    fn parse_source_routed_nwk_header() {
+        let raw = [
+            0x08, 0x06, 0x34, 0x12, 0x00, 0x00, 0x1d, 0x42, 0x01, 0x00, 0xcd, 0xab, 0x28,
+        ];
+
+        let (header, len) = Header::try_read(&raw, ()).unwrap();
+
+        assert!(header.frame_control.source_flag());
+        let subframe = header.source_route_subframe.unwrap();
+        assert_eq!(subframe.relay_count, 1);
+        assert_eq!(subframe.relay_list, &[0xcd, 0xab]);
+        assert_eq!(len, 12);
     }
 }
