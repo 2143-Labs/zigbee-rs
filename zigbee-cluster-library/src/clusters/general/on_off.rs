@@ -40,9 +40,16 @@ pub const CLUSTER_ID: u16 = CLUSTER.id().0;
 pub const ON_OFF: Attribute<Bool, ReadOnly, Reportable> =
     CLUSTER.attribute(AttributeId(0x0000), "OnOff");
 
+/// `GlobalSceneControl` (ZCL 3.8.2.2.2), mandatory for every On/Off server.
+///
+/// This device serves no Scenes cluster, so scenes never take over the state
+/// and the attribute always reads `false`.
+pub const GLOBAL_SCENE_CONTROL: Attribute<Bool, ReadOnly> =
+    CLUSTER.attribute(AttributeId(0x4000), "GlobalSceneControl");
+
 /// Every attribute this cluster implements, in ascending identifier order
 /// (2.5.13.3).
-const ATTRIBUTES: &[AttrInfo] = &[ON_OFF.attr_info()];
+const ATTRIBUTES: &[AttrInfo] = &[ON_OFF.attr_info(), GLOBAL_SCENE_CONTROL.attr_info()];
 
 /// Bare attribute identifiers, for matching against a received record.
 ///
@@ -51,6 +58,8 @@ const ATTRIBUTES: &[AttrInfo] = &[ON_OFF.attr_info()];
 pub mod attribute {
     /// `OnOff` (`bool`), whether the device is on.
     pub const ON_OFF: u16 = super::ON_OFF.id().0;
+    /// `GlobalSceneControl` (`bool`), always `false` here.
+    pub const GLOBAL_SCENE_CONTROL: u16 = super::GLOBAL_SCENE_CONTROL.id().0;
 }
 
 /// Cluster-specific command identifiers (ZCL 3.8.2.3).
@@ -123,10 +132,12 @@ impl ClusterServer for OnOffServer<'_> {
     }
 
     fn encode_value(&self, id: AttributeId, out: &mut [u8], offset: &mut usize) -> Status {
-        if id.0 != attribute::ON_OFF {
-            return Status::UnsupportedAttribute;
-        }
-        match ON_OFF.encode(self.on_off(), out, offset) {
+        let encoded = match id.0 {
+            attribute::ON_OFF => ON_OFF.encode(self.on_off(), out, offset),
+            attribute::GLOBAL_SCENE_CONTROL => GLOBAL_SCENE_CONTROL.encode(false, out, offset),
+            _ => return Status::UnsupportedAttribute,
+        };
+        match encoded {
             Ok(()) => Status::Success,
             Err(_) => Status::InsufficientSpace,
         }
@@ -209,6 +220,23 @@ mod tests {
             run(&server, 0x40),
             CommandOutcome::Status(Status::UnsupCommand)
         );
+    }
+
+    #[test]
+    fn global_scene_control_is_mandatory_and_false() {
+        assert!(
+            ATTRIBUTES.iter().any(|info| info.id == AttributeId(0x4000)),
+            "mandatory attribute must be advertised"
+        );
+
+        let server = OnOffServer::new();
+        let mut out = [0u8; 8];
+        let mut offset = 0;
+        assert_eq!(
+            server.encode_value(GLOBAL_SCENE_CONTROL.id(), &mut out, &mut offset),
+            Status::Success
+        );
+        assert_eq!(&out[..offset], &[0x10, 0x00]);
     }
 
     #[test]
