@@ -116,10 +116,13 @@ pub trait ClusterServer {
     /// and advance `offset` only when the record was decoded; the dispatcher
     /// resynchronizes otherwise.
     ///
-    /// The default reports every attribute as read-only, which is what a
-    /// cluster with no writable attributes owes the requester (2.5.4.1.2).
-    /// Override to distinguish an attribute this server does not have, which
-    /// is answered `UnsupportedAttribute`.
+    /// The dispatcher answers an attribute missing from
+    /// [`attributes`](Self::attributes) with `UnsupportedAttribute`, a
+    /// read-only one with `ReadOnly` and a mistyped one with
+    /// `InvalidDataType` before calling this, so it only sees writes to
+    /// writable attributes of the declared type. The default then reports
+    /// every attribute as read-only, which is what a cluster with no writable
+    /// attributes owes the requester (2.5.4.1.2).
     fn decode_value(
         &self,
         _id: AttributeId,
@@ -333,7 +336,13 @@ where
     let raw_type: u8 = body.read_with(offset, ctx::LE).ok()?;
 
     let value_at = *offset;
-    let status = server.decode_value(AttributeId(id), TypeId::from_u8(raw_type), body, offset);
+    // 2.5.3.3: an attribute the server lacks is UNSUPPORTED_ATTRIBUTE, a
+    // read-only one READ_ONLY and a mistyped one INVALID_DATA_TYPE, decided from
+    // the attribute list before the server sees the value
+    let mut status = check_writable(server, AttributeId(id), TypeId::from_u8(raw_type));
+    if status == Status::Success {
+        status = server.decode_value(AttributeId(id), TypeId::from_u8(raw_type), body, offset);
+    }
     if status != Status::Success {
         // the server left the offset untouched, so step over the value with
         // the length its own type byte implies to stay aligned on the next
@@ -992,6 +1001,39 @@ mod tests {
 
         // WriteAttributesResponse carrying ReadOnly for ZCLVersion
         assert_eq!(&out[..reply.len], &[0x18, 0x09, 0x04, 0x88, 0x00, 0x00]);
+    }
+
+    // 2.5.3.3: an attribute the server does not implement is unsupported, not read-only
+    #[test]
+    fn a_write_to_an_attribute_the_server_lacks_is_unsupported() {
+        let asdu = [0x00, 0x0a, 0x02, 0x99, 0x99, 0x20, 0x01];
+        let mut out = [0u8; 32];
+
+        let reply = SERVER
+            .handle_request(&request(0x0000, &asdu), &mut out)
+            .expect("handled");
+
+        // WriteAttributesResponse carrying UnsupportedAttribute for 0x9999
+        assert_eq!(&out[..reply.len], &[0x18, 0x0a, 0x04, 0x86, 0x99, 0x99]);
+    }
+
+    // 2.5.3.1.1: a refused record still steps over its value, so the next record lines up
+    #[test]
+    fn an_unsupported_record_is_skipped_and_the_next_still_applies() {
+        let server = IdentifyServer::new();
+        let asdu = [
+            0x00, 0x07, 0x02, // frame control, sequence, WriteAttributes
+            0x99, 0x99, 0x20, 0x01, // unsupported attribute, uint8, 1
+            0x00, 0x00, 0x21, 0x0a, 0x00, // IdentifyTime, uint16, 10
+        ];
+
+        let mut out = [0u8; 32];
+        let reply = server
+            .handle_request(&request(0x0003, &asdu), &mut out)
+            .expect("handled");
+
+        assert_eq!(server.identify_time(), 10);
+        assert_eq!(&out[..reply.len], &[0x18, 0x07, 0x04, 0x86, 0x99, 0x99]);
     }
 
     // 2.5.6.3: no response of any kind, but the write still happens
